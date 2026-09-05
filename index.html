@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#03020a">
+<title>INFINITE — Dream Descent</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#03020a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+#c{position:fixed;inset:0;width:100%;height:100%;touch-action:none;-webkit-user-select:none;user-select:none}
+#hud{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:14px;right:14px;display:flex;justify-content:space-between;pointer-events:none;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#fff9;text-shadow:0 2px 12px #000}
+#tip{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 70px);transform:translateX(-50%);white-space:nowrap;color:#fff8;font-size:11px;pointer-events:none}
+#controls{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 15px);transform:translateX(-50%);display:flex;gap:8px}
+button{appearance:none;border:1px solid #ffffff35;background:#08060dcc;color:#fff;border-radius:999px;padding:10px 14px;font-weight:600;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span>INFINITE / DREAM DESCENT</span><span>DEPTH <b id="depth">0</b></span></div>
+<div id="tip">🤏 pinch to descend · drag to drift</div>
+<div id="controls"><button id="dive">DIVE ×10</button><button id="reset">RESET</button></div>
+<script>
+const C=document.getElementById('c'),ctx=C.getContext('2d');
+let W=innerWidth,H=innerHeight,DPR=Math.min(devicePixelRatio||1,2);
+let zoom=1,panX=0,panY=0, lastPinch=0, pinchZoom=1, dragging=false, lastX=0,lastY=0;
+let touchPoints=new Map(), lastTap=0;
+
+function size(){W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2);C.width=W*DPR;C.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0)}
+addEventListener('resize',size);size();
+
+function R(n){let x=Math.sin(n*12.9898+78.233)*43758.5453;return x-Math.floor(x)}
+function col(seed,s=75,l=60,a=1){return `hsla(${((seed*137.5)%360+360)%360},${s}%,${l}%,${a})`}
+function eye(x,y,s,rot,c){
+ ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.strokeStyle=c;ctx.lineWidth=Math.max(1,s*.035);
+ ctx.beginPath();ctx.ellipse(0,0,s,s*.4,0,0,Math.PI*2);ctx.stroke();
+ ctx.fillStyle=c;ctx.beginPath();ctx.arc(0,0,s*.14,0,Math.PI*2);ctx.fill();ctx.restore();
+}
+function glyph(seed,x,y,s,r){
+ ctx.save();ctx.translate(x,y);ctx.rotate(r);ctx.strokeStyle=col(seed,100,75,.7);ctx.lineWidth=Math.max(.7,s*.035);
+ ctx.beginPath();ctx.moveTo(-s,0);ctx.lineTo(0,-s*.75);ctx.lineTo(s,0);ctx.lineTo(0,s*.75);ctx.closePath();ctx.stroke();
+ ctx.beginPath();ctx.arc(0,0,s*.38,0,Math.PI*2);ctx.stroke();ctx.restore();
+}
+function scene(seed,level,size){
+ const HUE=(seed+level*43)%360;
+ ctx.fillStyle=`hsl(${HUE},48%,${5+level%4}%)`;ctx.fillRect(-size,-size,size*2,size*2);
+ let g=ctx.createRadialGradient(0,0,0,0,0,size);
+ g.addColorStop(0,col(seed+level*17,90,26,.95));
+ g.addColorStop(.45,col(seed+level*29,70,10,.9));
+ g.addColorStop(1,'rgba(0,0,0,.98)');ctx.fillStyle=g;ctx.fillRect(-size,-size,size*2,size*2);
+
+ // Stars
+ for(let i=0;i<110;i++){
+  let a=R(seed+i+level)*Math.PI*2,rr=size*(.08+R(seed+i*3)*.95);
+  ctx.fillStyle=col(seed+i*7+level,100,85,.25+R(i+seed)*.65);
+  ctx.beginPath();ctx.arc(Math.cos(a)*rr,Math.sin(a)*rr,.5+R(i+9)*1.4,0,Math.PI*2);ctx.fill();
+ }
+
+ // Four different mini-realities
+ const zones=[
+  [-.34,-.28,'water'],[.34,-.28,'fire'],[-.34,.29,'forest'],[.34,.29,'machine']
+ ];
+ zones.forEach((z,i)=>{
+  let [px,py,type]=z,s=size*.18;
+  ctx.save();ctx.translate(px*size,py*size);
+  ctx.strokeStyle=col(seed+i*91+level*5,100,72,.55);ctx.lineWidth=1;
+  if(type==='water'){
+   for(let k=0;k<7;k++){ctx.beginPath();ctx.ellipse(0,(k-3)*s*.13,s*(1-k*.06),s*.06,0,0,Math.PI*2);ctx.stroke()}
+   for(let k=0;k<5;k++){eye((R(seed+k)*2-1)*s*.8,(R(seed+k+20)*2-1)*s*.55,s*.12,R(k),col(seed+k,100,75,.8))}
+  }else if(type==='fire'){
+   for(let k=0;k<8;k++){let xx=(R(seed+k)*2-1)*s;ctx.fillStyle=col(seed+k*13+level,95,60,.5);ctx.beginPath();ctx.moveTo(xx,s*.55);ctx.quadraticCurveTo(xx-s*.15,-s*.5,xx+(R(k)-.5)*s*.35,0);ctx.quadraticCurveTo(xx+s*.1,s*.25,xx,s*.55);ctx.fill()}
+  }else if(type==='forest'){
+   for(let k=0;k<9;k++){let xx=(R(seed+k*4)*2-1)*s,hh=s*(.35+R(k+40)*.8);ctx.fillStyle=col(seed+k*17,75,45,.75);ctx.beginPath();ctx.moveTo(xx,-hh);ctx.lineTo(xx-s*.11,0);ctx.lineTo(xx+s*.11,0);ctx.closePath();ctx.fill()}
+  }else{
+   for(let k=0;k<6;k++)glyph(seed+k*13,0,0,s*(.18+k*.12),k*.7+level*.2);
+  }
+  ctx.restore();
+ });
+
+ // Floating eyes and beings
+ for(let i=0;i<18;i++){
+  let a=R(seed+i*11+level*3)*Math.PI*2,rr=size*(.18+R(seed+i*5)*.52);
+  let xx=Math.cos(a)*rr,yy=Math.sin(a)*rr,s=size*(.007+R(seed+i)*.018);
+  eye(xx,yy,s*2,a+Math.PI/2,col(seed+i*17+level*9,100,75,.7));
+ }
+
+ // Main recursive portal
+ const pr=size*.145;
+ let pg=ctx.createRadialGradient(0,0,0,0,0,pr*1.8);
+ pg.addColorStop(0,'rgba(255,255,255,.98)');
+ pg.addColorStop(.09,col(seed+level*71,100,82,.95));
+ pg.addColorStop(.35,col(seed+level*101,100,58,.55));
+ pg.addColorStop(1,'transparent');
+ ctx.fillStyle=pg;ctx.beginPath();ctx.arc(0,0,pr*1.8,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle=col(seed+level*31,100,82,.9);ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(0,0,pr,0,Math.PI*2);ctx.stroke();
+ ctx.fillStyle='#02010a';ctx.beginPath();ctx.ellipse(0,0,pr*.61,pr*.82,level*.17,0,Math.PI*2);ctx.fill();
+
+ for(let i=0;i<9;i++){let a=i*Math.PI*2/9+level*.12;glyph(seed+i+level*23,Math.cos(a)*pr*1.55,Math.sin(a)*pr*1.55,size*.018,a)}
+
+ ctx.save();ctx.textAlign='center';ctx.font=`600 ${Math.max(9,size*.018)}px system-ui`;ctx.fillStyle='#ffffff99';
+ const words=['ALL THINGS ARE ONE','LET GO','LOOK CLOSER','THERE IS NO EDGE','YOU WERE ALWAYS HERE','TIME IS A CIRCLE','WHO IS LOOKING?'];
+ ctx.fillText(words[level%words.length],0,size*.37);ctx.restore();
+
+ // The actual recursive artwork inside the portal.
+ ctx.save();ctx.beginPath();ctx.ellipse(0,0,pr*.60,pr*.81,level*.17,0,Math.PI*2);ctx.clip();
+ scene(seed+7919,level+1,pr*.72);
+ ctx.restore();
+}
+
+function render(){
+ const view=Math.min(W,H)*.68;
+ // We render many nested worlds at once. Zoom is continuous, so there is no hard level jump.
+ ctx.clearRect(0,0,W,H);
+ ctx.save();
+ ctx.translate(W/2+panX,H/2+panY);
+ ctx.scale(zoom,zoom);
+ scene(1337,0,view);
+ ctx.restore();
+ // Depth is logarithmic: every ~1.55x feels like entering another world.
+ document.getElementById('depth').textContent=Math.floor(Math.log(zoom)/Math.log(1.55));
+ requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// Desktop wheel
+C.addEventListener('wheel',e=>{e.preventDefault();zoom*=Math.exp(-e.deltaY*.0016);zoom=Math.max(.75,Math.min(1e18,zoom))},{passive:false});
+
+// Reliable iPhone touch controls — native touch events instead of relying on Safari pointer pinch.
+C.addEventListener('touchstart',e=>{
+ e.preventDefault();
+ for(const t of e.changedTouches)touchPoints.set(t.identifier,[t.clientX,t.clientY]);
+ if(touchPoints.size===1){let t=e.changedTouches[0];dragging=true;lastX=t.clientX;lastY=t.clientY}
+ if(touchPoints.size===2){
+  const a=[...touchPoints.values()];lastPinch=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);pinchZoom=zoom;dragging=false;
+ }
+ const now=Date.now();
+ if(touchPoints.size===1 && now-lastTap<320){zoom*=Math.pow(1.55,5)}
+ lastTap=now;
+},{passive:false});
+
+C.addEventListener('touchmove',e=>{
+ e.preventDefault();
+ for(const t of e.changedTouches)touchPoints.set(t.identifier,[t.clientX,t.clientY]);
+ if(touchPoints.size===1 && dragging){
+  const t=e.changedTouches[0];panX+=t.clientX-lastX;panY+=t.clientY-lastY;lastX=t.clientX;lastY=t.clientY;
+ }
+ if(touchPoints.size>=2){
+  const a=[...touchPoints.values()].slice(0,2);
+  const d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);
+  if(lastPinch>0){zoom=pinchZoom*(d/lastPinch);zoom=Math.max(.75,Math.min(1e18,zoom))}
+ }
+},{passive:false});
+
+C.addEventListener('touchend',e=>{
+ e.preventDefault();
+ for(const t of e.changedTouches)touchPoints.delete(t.identifier);
+ if(touchPoints.size===0){dragging=false;lastPinch=0}
+ if(touchPoints.size===1){let t=[...touchPoints.values()][0];lastX=t[0];lastY=t[1];dragging=true}
+},{passive:false});
+C.addEventListener('touchcancel',()=>{touchPoints.clear();dragging=false;lastPinch=0},{passive:false});
+
+document.getElementById('dive').onclick=()=>zoom*=Math.pow(1.55,10);
+document.getElementById('reset').onclick=()=>{zoom=1;panX=panY=0};
+</script>
+</body>
+</html>
