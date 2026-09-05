@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#03020a">
+<title>INFINITE — Dream Descent</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#03020a;color:white;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+#hud{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:14px;right:14px;display:flex;justify-content:space-between;pointer-events:none;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#fff9;text-shadow:0 2px 12px #000}
+#depth{color:#fff}
+#controls{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 14px);transform:translateX(-50%);display:flex;gap:8px}
+button{appearance:none;border:1px solid #ffffff35;background:#08060dcc;color:#fff;border-radius:999px;padding:10px 14px;font-weight:600;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+#tip{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 65px);transform:translateX(-50%);white-space:nowrap;color:#fff8;font-size:11px;pointer-events:none;opacity:.85}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span>INFINITE / DREAM DESCENT</span><span>DEPTH <b id="depth">0</b></span></div>
+<div id="tip">pinch / scroll to descend · drag to drift</div>
+<div id="controls"><button id="dive">DIVE ×10</button><button id="reset">RESET</button></div>
+<script>
+const C=document.getElementById('c'),ctx=C.getContext('2d');
+let W=innerWidth,H=innerHeight,DPR=Math.min(devicePixelRatio||1,2);
+let zoom=1,panX=0,panY=0,auto=false,lastTime=0;
+let pointers=new Map(), pinch0=0, zoom0=1, dragging=false,lastX=0,lastY=0;
+function size(){W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2);C.width=W*DPR;C.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0)}
+addEventListener('resize',size);size();
+
+function R(n){let x=Math.sin(n*12.9898+78.233)*43758.5453;return x-Math.floor(x)}
+function hs(seed){return `hsl(${(seed*137.5)%360},${65+R(seed)*30}%,${45+R(seed+4)*35}%)`}
+function ring(r,col,a=1,w=1){ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.strokeStyle=col;ctx.globalAlpha=a;ctx.lineWidth=w;ctx.stroke();ctx.globalAlpha=1}
+function starfield(seed,s){for(let i=0;i<80;i++){let a=R(seed+i)*Math.PI*2,rr=s*(.12+R(seed+i+40)*.9),x=Math.cos(a)*rr,y=Math.sin(a)*rr,r=.4+R(seed+i+90)*1.5;ctx.fillStyle=`hsla(${(seed*31+i*17)%360},100%,85%,${.2+R(i+seed)*.7})`;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill()}}
+function eye(x,y,s,rot,col){
+ ctx.save();ctx.translate(x,y);ctx.rotate(rot);
+ ctx.strokeStyle=col;ctx.lineWidth=Math.max(1,s*.035);ctx.beginPath();ctx.ellipse(0,0,s,s*.42,0,0,Math.PI*2);ctx.stroke();
+ ctx.fillStyle=col;ctx.beginPath();ctx.arc(0,0,s*.16,0,Math.PI*2);ctx.fill();ctx.restore();
+}
+function glyph(seed,x,y,s,rot){
+ ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.strokeStyle=hs(seed);ctx.globalAlpha=.7;ctx.lineWidth=Math.max(.6,s*.025);
+ ctx.beginPath();ctx.moveTo(-s,0);ctx.lineTo(0,-s*.7);ctx.lineTo(s,0);ctx.lineTo(0,s*.7);ctx.closePath();ctx.stroke();
+ ctx.beginPath();ctx.arc(0,0,s*.42,0,Math.PI*2);ctx.stroke();ctx.restore();
+}
+function scene(seed,level,size){
+ // Each world is self-contained and intentionally different, while its central aperture contains the next world.
+ const base=hs(seed+level*7), alt=hs(seed+level*11+3);
+ ctx.fillStyle=`hsl(${(seed*19+level*43)%360},55%,7%)`;ctx.fillRect(-size,-size,size*2,size*2);
+ // atmospheric gradients
+ let g=ctx.createRadialGradient(0,0,0,0,0,size*.95);
+ g.addColorStop(0,`hsla(${(seed*29+level*51)%360},90%,28%,.9)`);
+ g.addColorStop(.45,`hsla(${(seed*17+level*71)%360},70%,10%,.8)`);
+ g.addColorStop(1,'rgba(0,0,0,.98)');ctx.fillStyle=g;ctx.fillRect(-size,-size,size*2,size*2);
+ starfield(seed+level*97,size);
+
+ // four "memories" orbiting the world
+ for(let q=0;q<4;q++){
+   let a=q*Math.PI/2+level*.37,rr=size*.42,s=size*.12;
+   ctx.save();ctx.translate(Math.cos(a)*rr,Math.sin(a)*rr);ctx.rotate(a);
+   ctx.fillStyle=`hsla(${(level*77+q*83+seed)%360},75%,45%,.6)`;
+   ctx.beginPath();ctx.moveTo(-s,0);ctx.quadraticCurveTo(0,-s*1.2,s,0);ctx.quadraticCurveTo(0,s*1.2,-s,0);ctx.fill();
+   for(let k=1;k<5;k++){ring(s*k/5,`hsla(${(seed+q*80+k*30)%360},100%,80%,.4)`,1,1)}
+   ctx.restore();
+ }
+
+ // fractal architecture
+ for(let i=0;i<8;i++){
+   let rr=size*(.11+i*.052);
+   ctx.save();ctx.rotate(i*.17+level*.08);
+   ctx.strokeStyle=`hsla(${(seed*13+i*43+level*17)%360},90%,75%,.26)`;
+   ctx.lineWidth=1;
+   ctx.beginPath();for(let j=0;j<6;j++){let a=j*Math.PI/3,rad=rr*(.7+.3*Math.sin(j*3.1+seed));let px=Math.cos(a)*rad,py=Math.sin(a)*rad;j?ctx.lineTo(px,py):ctx.moveTo(px,py)}ctx.closePath();ctx.stroke();ctx.restore();
+ }
+
+ // floating observers / strange organisms
+ for(let i=0;i<14;i++){
+   let a=R(seed+i*5+level)*Math.PI*2,rr=size*(.18+R(seed+i*9)*.5),x=Math.cos(a)*rr,y=Math.sin(a)*rr,s=size*(.008+R(seed+i*2)*.018);
+   eye(x,y,s*2,a+Math.PI/2,hs(seed+i+level*5));
+ }
+
+ // central portal / doorway
+ let pr=size*.145;
+ ctx.save();
+ let pg=ctx.createRadialGradient(0,0,0,0,0,pr*1.7);
+ pg.addColorStop(0,'rgba(255,255,255,.95)');pg.addColorStop(.08,`hsla(${(seed+level*60)%360},100%,75%,.95)`);
+ pg.addColorStop(.35,`hsla(${(seed+level*120)%360},100%,55%,.5)`);pg.addColorStop(1,'transparent');
+ ctx.fillStyle=pg;ctx.beginPath();ctx.arc(0,0,pr*1.7,0,Math.PI*2);ctx.fill();
+ ring(pr,`hsla(${(seed+level*91)%360},100%,85%,.95)`,1,2.5);
+ ring(pr*1.18,`hsla(${(seed+level*31)%360},100%,70%,.65)`,1,1);
+ ctx.fillStyle='#02010a';ctx.beginPath();ctx.ellipse(0,0,pr*.64,pr*.86,level*.2,0,Math.PI*2);ctx.fill();
+ ctx.restore();
+
+ // nested doorway markers around the aperture
+ for(let i=0;i<8;i++){let a=i*Math.PI/4+level*.12;glyph(seed+i+level*19,Math.cos(a)*pr*1.55,Math.sin(a)*pr*1.55,size*.018,a)}
+
+ // meaning fragments
+ const words=['ALL THINGS ARE ONE','LET GO','LOOK CLOSER','THERE IS NO EDGE','YOU WERE ALWAYS HERE','TIME IS A CIRCLE','WHO IS LOOKING?'];
+ ctx.save();ctx.textAlign='center';ctx.font=`600 ${Math.max(9,size*.018)}px system-ui`;ctx.fillStyle='#ffffffaa';
+ ctx.fillText(words[level%words.length],0,size*.36);ctx.restore();
+
+ // Recursive next world, physically drawn inside the portal.
+ ctx.save();
+ ctx.beginPath();ctx.ellipse(0,0,pr*.61,pr*.83,level*.2,0,Math.PI*2);ctx.clip();
+ const nextScale=pr*.72;
+ scene(seed+7919,level+1,nextScale);
+ ctx.restore();
+}
+
+function draw(){
+ const min=Math.min(W,H), view=min*.62;
+ ctx.clearRect(0,0,W,H);
+ ctx.save();ctx.translate(W/2+panX,H/2+panY);
+ // Camera zoom: every 1.55x crosses another recursive world.
+ const raw=Math.log(zoom)/Math.log(1.55);
+ const lvl=Math.floor(raw);
+ const local=Math.pow(1.55,raw-lvl);
+ document.getElementById('depth').textContent=lvl;
+ // Draw a finite-but-deep recursive tree around the camera. It is mathematically generated,
+ // so there is no huge image to load.
+ ctx.scale(local,local);
+ scene(1337,lvl,view);
+ ctx.restore();
+ requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+C.addEventListener('wheel',e=>{e.preventDefault();zoom*=Math.exp(-e.deltaY*.0015);zoom=Math.max(1,Math.min(1e120,zoom))},{passive:false});
+C.addEventListener('pointerdown',e=>{pointers.set(e.pointerId,[e.clientX,e.clientY]);dragging=true;lastX=e.clientX;lastY=e.clientY});
+C.addEventListener('pointermove',e=>{
+ if(pointers.has(e.pointerId))pointers.set(e.pointerId,[e.clientX,e.clientY]);
+ if(pointers.size===1&&dragging){panX+=e.clientX-lastX;panY+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY}
+ if(pointers.size===2){let a=[...pointers.values()];let d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);if(!pinch0){pinch0=d;zoom0=zoom}else{zoom=zoom0*d/pinch0;zoom=Math.max(1,Math.min(1e120,zoom))}}
+});
+function up(e){pointers.delete(e.pointerId);if(!pointers.size){dragging=false;pinch0=0}}
+C.addEventListener('pointerup',up);C.addEventListener('pointercancel',up);
+document.getElementById('reset').onclick=()=>{zoom=1;panX=panY=0};
+document.getElementById('dive').onclick=()=>{zoom*=Math.pow(1.55,10)};
+</script>
+</body>
+</html>
